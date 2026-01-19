@@ -228,7 +228,7 @@ function App() {
                   fontSize={14}
                   fontWeight="bold"
                   textDistance={60}
-                  spinDuration={2.4}
+                  spinDuration={1.5}
                   disableInitialAnimation={true}
                 />
                 <button onClick={handleSpinClick} disabled={mustSpin} className="spin-btn">
