@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { Wheel } from 'spin-wheel'
 import './App.css'
 
 const PASSWORD = 'happycamel123'
@@ -25,30 +26,19 @@ function App() {
   const [timer, setTimer] = useState(60)
   const [timerRunning, setTimerRunning] = useState(false)
   const [spinning, setSpinning] = useState(false)
-  const [wheelAngle, setWheelAngle] = useState(0)
   const [wheelResult, setWheelResult] = useState([])
   const [remainingTeams, setRemainingTeams] = useState(TEAMS)
   const [justSelected, setJustSelected] = useState(null)
   const [selectedTeam, setSelectedTeam] = useState(null)
   const [showAddPlayer, setShowAddPlayer] = useState(false)
   const [customPlayer, setCustomPlayer] = useState({ name: '', position: '', rating: '', clubName: '' })
-  const canvasRef = useRef(null)
-  const imagesRef = useRef({})
+  const wheelContainerRef = useRef(null)
+  const wheelRef = useRef(null)
+  const remainingTeamsRef = useRef(remainingTeams)
+  const spinningRef = useRef(spinning)
 
-  useEffect(() => {
-    let loadedCount = 0
-    TEAMS.forEach(team => {
-      const img = new Image()
-      img.src = team.logo
-      img.onload = () => {
-        imagesRef.current[team.id] = img
-        loadedCount++
-        if (loadedCount === TEAMS.length) {
-          drawWheel(TEAMS, 0)
-        }
-      }
-    })
-  }, [])
+  useEffect(() => { remainingTeamsRef.current = remainingTeams }, [remainingTeams])
+  useEffect(() => { spinningRef.current = spinning }, [spinning])
 
   useEffect(() => {
     fetch('/players.json').then(r => r.json()).then(d => setPlayers(d.players || [])).catch(() => {})
@@ -68,6 +58,56 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!wheelContainerRef.current || remainingTeams.length === 0 || phase !== 'setup') return
+
+    const container = wheelContainerRef.current
+    container.innerHTML = ''
+
+    const items = remainingTeams.map(team => ({
+      label: team.name.split(' ').slice(-1)[0],
+      backgroundColor: team.color,
+      image: team.logo,
+      imageRadius: 0.5,
+      imageScale: 0.65,
+    }))
+
+    const wheel = new Wheel(container, {
+      items,
+      itemLabelRadius: 0.88,
+      itemLabelRadiusMax: 0.35,
+      itemLabelRotation: 0,
+      itemLabelAlign: 'center',
+      itemLabelColors: ['#fff'],
+      itemLabelBaselineOffset: -0.1,
+      itemLabelFont: 'bold 16px sans-serif',
+      itemBackgroundColors: remainingTeams.map(t => t.color),
+      lineWidth: 2,
+      lineColor: '#fff',
+      radius: 0.95,
+      pointerAngle: 90,
+      rotationSpeedMax: 500,
+      rotationResistance: -70,
+      onRest: (event) => {
+        if (!spinningRef.current) return
+        const winnerIndex = event.currentIndex
+        const winner = remainingTeamsRef.current[winnerIndex]
+        if (!winner) return
+
+        setJustSelected(winner)
+        setTimeout(() => {
+          setWheelResult(prev => [...prev, winner])
+          setRemainingTeams(prev => prev.filter(t => t.id !== winner.id))
+          setJustSelected(null)
+          setSpinning(false)
+        }, 1200)
+      }
+    })
+
+    wheelRef.current = wheel
+    return () => { wheel.remove() }
+  }, [remainingTeams, phase])
+
+  useEffect(() => {
     if (phase !== 'setup') localStorage.setItem('draftState', JSON.stringify({ phase, draftOrder, currentPick, teamRosters, wheelResult }))
   }, [phase, draftOrder, currentPick, teamRosters, wheelResult])
 
@@ -77,63 +117,6 @@ function App() {
     return () => clearTimeout(t)
   }, [timerRunning, timer])
 
-  const drawWheel = (teams, angle, flashTeamId = null) => {
-    const canvas = canvasRef.current
-    if (!canvas || !teams || teams.length === 0) return
-    const ctx = canvas.getContext('2d')
-    const size = 500, center = size / 2, radius = 230
-    const segmentAngle = 360 / teams.length
-
-    ctx.imageSmoothingEnabled = true
-    ctx.imageSmoothingQuality = 'high'
-    ctx.clearRect(0, 0, size, size)
-    ctx.save()
-    ctx.translate(center, center)
-    ctx.rotate((angle * Math.PI) / 180)
-
-    teams.forEach((team, i) => {
-      const startAngle = (i * segmentAngle - 90) * Math.PI / 180
-      const endAngle = ((i + 1) * segmentAngle - 90) * Math.PI / 180
-      const midAngle = (startAngle + endAngle) / 2
-
-      ctx.beginPath()
-      ctx.moveTo(0, 0)
-      ctx.arc(0, 0, radius, startAngle, endAngle)
-
-      if (flashTeamId === team.id) {
-        ctx.fillStyle = '#FFD700'
-      } else {
-        ctx.fillStyle = team.color
-      }
-      ctx.fill()
-      ctx.strokeStyle = '#fff'
-      ctx.lineWidth = 3
-      ctx.stroke()
-
-      const img = imagesRef.current[team.id]
-      if (img) {
-        const logoSize = teams.length <= 3 ? 90 : teams.length <= 4 ? 80 : 70
-        const logoX = Math.cos(midAngle) * (radius * 0.55) - logoSize / 2
-        const logoY = Math.sin(midAngle) * (radius * 0.55) - logoSize / 2
-        ctx.save()
-        ctx.beginPath()
-        ctx.arc(logoX + logoSize/2, logoY + logoSize/2, logoSize/2, 0, Math.PI * 2)
-        ctx.clip()
-        ctx.drawImage(img, logoX, logoY, logoSize, logoSize)
-        ctx.restore()
-      }
-    })
-    ctx.restore()
-
-    ctx.beginPath()
-    ctx.moveTo(center, 38)
-    ctx.lineTo(center - 18, 5)
-    ctx.lineTo(center + 18, 5)
-    ctx.fillStyle = '#000'
-    ctx.fill()
-  }
-
-  useEffect(() => { drawWheel(remainingTeams, wheelAngle) }, [wheelAngle, remainingTeams])
 
   const draftedIds = useMemo(() => {
     const ids = new Set()
@@ -195,55 +178,11 @@ function App() {
   }
 
   const spinWheel = () => {
-    if (spinning || remainingTeams.length === 0) return
+    if (spinning || remainingTeams.length === 0 || !wheelRef.current) return
     setSpinning(true)
     setJustSelected(null)
-
-    const teams = remainingTeams
-    const segmentAngle = 360 / teams.length
-    const spins = 4 + Math.random() * 2
-    const randomOffset = Math.random() * 360
-    const finalAngle = spins * 360 + randomOffset
-    const duration = 3000, start = Date.now(), startAngle = 0
-
-    const animate = () => {
-      const elapsed = Date.now() - start
-      const progress = Math.min(elapsed / duration, 1)
-      const eased = 1 - Math.pow(1 - progress, 4)
-      const currentAngle = startAngle + finalAngle * eased
-      setWheelAngle(currentAngle)
-      drawWheel(teams, currentAngle)
-
-      if (progress < 1) {
-        requestAnimationFrame(animate)
-      } else {
-        const normalizedAngle = finalAngle % 360
-        const pointerAngle = (360 - normalizedAngle + 90) % 360
-        const segmentIndex = Math.floor(pointerAngle / segmentAngle) % teams.length
-        const winner = teams[segmentIndex]
-
-        let flashCount = 0
-        const flash = () => {
-          flashCount++
-          drawWheel(teams, finalAngle, flashCount % 2 === 1 ? winner.id : null)
-          if (flashCount < 6) {
-            setTimeout(flash, 150)
-          } else {
-            setJustSelected(winner)
-            setTimeout(() => {
-              setWheelResult(prev => [...prev, winner])
-              setRemainingTeams(prev => prev.filter(t => t.id !== winner.id))
-              setWheelAngle(0)
-              setJustSelected(null)
-              setSpinning(false)
-            }, 800)
-          }
-        }
-        flash()
-      }
-    }
-    setWheelAngle(0)
-    requestAnimationFrame(animate)
+    const spinDuration = 4000 + Math.random() * 2000
+    wheelRef.current.spinToItem(Math.floor(Math.random() * remainingTeams.length), spinDuration, true, 3 + Math.random() * 2)
   }
 
   const startDraft = () => {
@@ -256,13 +195,12 @@ function App() {
   const resetDraft = () => {
     if (!confirm('Reset draft?')) return
     localStorage.removeItem('draftState')
-    setPhase('setup'); setDraftOrder([]); setCurrentPick(0); setTeamRosters({}); setWheelResult([]); setRemainingTeams(TEAMS); setWheelAngle(0); setJustSelected(null)
+    setPhase('setup'); setDraftOrder([]); setCurrentPick(0); setTeamRosters({}); setWheelResult([]); setRemainingTeams(TEAMS); setJustSelected(null)
   }
   const resetWheel = () => {
     if (spinning) return
     setWheelResult([])
     setRemainingTeams(TEAMS)
-    setWheelAngle(0)
     setJustSelected(null)
   }
 
@@ -311,7 +249,8 @@ function App() {
             )}
             {remainingTeams.length > 0 ? (
               <>
-                <canvas ref={canvasRef} width={500} height={500} />
+                <div ref={wheelContainerRef} className="wheel-canvas" />
+                <div className="wheel-pointer">▼</div>
                 <button onClick={spinWheel} disabled={spinning || allSelected} className="spin-btn">
                   {spinning ? 'Spinning...' : allSelected ? 'All Selected!' : `SPIN (${wheelResult.length + 1}/6)`}
                 </button>
