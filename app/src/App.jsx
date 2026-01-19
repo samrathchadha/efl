@@ -1,15 +1,15 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
-import { Wheel } from 'spin-wheel'
+import { useState, useEffect, useMemo } from 'react'
+import { Wheel } from 'react-custom-roulette'
 import './App.css'
 
 const PASSWORD = 'happycamel123'
 const TEAMS = [
-  { id: 1, name: 'Hot Mocha Machas', logo: '/logos/hot-mocha-machas.jpeg', color: '#8B4513' },
-  { id: 2, name: 'Dhaba Dominators', logo: '/logos/dhaba-dominators.jpeg', color: '#8B0000' },
-  { id: 3, name: 'Blue Tokai Ballerz', logo: '/logos/blue-tokai-ballerz.jpeg', color: '#1E3A5F' },
-  { id: 4, name: 'Chak De Champions', logo: '/logos/chak-de-champions.jpeg', color: '#D2691E' },
-  { id: 5, name: 'GTown FC', logo: '/logos/gtown-fc.jpeg', color: '#228B22' },
-  { id: 6, name: 'Food Village Phantoms', logo: '/logos/food-village-phantoms.jpeg', color: '#2F2F2F' },
+  { id: 1, name: 'Hot Mocha Machas', color: '#8B4513' },
+  { id: 2, name: 'Dhaba Dominators', color: '#8B0000' },
+  { id: 3, name: 'Blue Tokai Ballerz', color: '#1E3A5F' },
+  { id: 4, name: 'Chak De Champions', color: '#D2691E' },
+  { id: 5, name: 'GTown FC', color: '#228B22' },
+  { id: 6, name: 'Food Village Phantoms', color: '#4A4A4A' },
 ]
 const TOTAL_PICKS = 18
 const MAX_PER_CLUB = 3
@@ -25,20 +25,13 @@ function App() {
   const [search, setSearch] = useState('')
   const [timer, setTimer] = useState(60)
   const [timerRunning, setTimerRunning] = useState(false)
-  const [spinning, setSpinning] = useState(false)
   const [wheelResult, setWheelResult] = useState([])
   const [remainingTeams, setRemainingTeams] = useState(TEAMS)
-  const [justSelected, setJustSelected] = useState(null)
+  const [mustSpin, setMustSpin] = useState(false)
+  const [prizeNumber, setPrizeNumber] = useState(0)
   const [selectedTeam, setSelectedTeam] = useState(null)
   const [showAddPlayer, setShowAddPlayer] = useState(false)
   const [customPlayer, setCustomPlayer] = useState({ name: '', position: '', rating: '', clubName: '' })
-  const wheelContainerRef = useRef(null)
-  const wheelRef = useRef(null)
-  const remainingTeamsRef = useRef(remainingTeams)
-  const spinningRef = useRef(spinning)
-
-  useEffect(() => { remainingTeamsRef.current = remainingTeams }, [remainingTeams])
-  useEffect(() => { spinningRef.current = spinning }, [spinning])
 
   useEffect(() => {
     fetch('/players.json').then(r => r.json()).then(d => setPlayers(d.players || [])).catch(() => {})
@@ -58,56 +51,6 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!wheelContainerRef.current || remainingTeams.length === 0 || phase !== 'setup') return
-
-    const container = wheelContainerRef.current
-    container.innerHTML = ''
-
-    const items = remainingTeams.map(team => ({
-      label: team.name.split(' ').slice(-1)[0],
-      backgroundColor: team.color,
-      image: team.logo,
-      imageRadius: 0.5,
-      imageScale: 0.65,
-    }))
-
-    const wheel = new Wheel(container, {
-      items,
-      itemLabelRadius: 0.88,
-      itemLabelRadiusMax: 0.35,
-      itemLabelRotation: 0,
-      itemLabelAlign: 'center',
-      itemLabelColors: ['#fff'],
-      itemLabelBaselineOffset: -0.1,
-      itemLabelFont: 'bold 16px sans-serif',
-      itemBackgroundColors: remainingTeams.map(t => t.color),
-      lineWidth: 2,
-      lineColor: '#fff',
-      radius: 0.95,
-      pointerAngle: 90,
-      rotationSpeedMax: 500,
-      rotationResistance: -70,
-      onRest: (event) => {
-        if (!spinningRef.current) return
-        const winnerIndex = event.currentIndex
-        const winner = remainingTeamsRef.current[winnerIndex]
-        if (!winner) return
-
-        setJustSelected(winner)
-        setTimeout(() => {
-          setWheelResult(prev => [...prev, winner])
-          setRemainingTeams(prev => prev.filter(t => t.id !== winner.id))
-          setJustSelected(null)
-          setSpinning(false)
-        }, 1200)
-      }
-    })
-
-    wheelRef.current = wheel
-    return () => { wheel.remove() }
-  }, [remainingTeams, phase])
-
-  useEffect(() => {
     if (phase !== 'setup') localStorage.setItem('draftState', JSON.stringify({ phase, draftOrder, currentPick, teamRosters, wheelResult }))
   }, [phase, draftOrder, currentPick, teamRosters, wheelResult])
 
@@ -117,6 +60,33 @@ function App() {
     return () => clearTimeout(t)
   }, [timerRunning, timer])
 
+  const wheelData = remainingTeams.map(t => ({
+    option: t.name,
+    style: { backgroundColor: t.color, textColor: '#fff' }
+  }))
+
+  const handleSpinClick = () => {
+    if (!mustSpin && remainingTeams.length > 0) {
+      const newPrizeNumber = Math.floor(Math.random() * remainingTeams.length)
+      setPrizeNumber(newPrizeNumber)
+      setMustSpin(true)
+    }
+  }
+
+  const handleStopSpinning = () => {
+    setMustSpin(false)
+    const winner = remainingTeams[prizeNumber]
+    const newRemaining = remainingTeams.filter(t => t.id !== winner.id)
+
+    // Auto-add last team if only one remains
+    if (newRemaining.length === 1) {
+      setWheelResult(prev => [...prev, winner, newRemaining[0]])
+      setRemainingTeams([])
+    } else {
+      setWheelResult(prev => [...prev, winner])
+      setRemainingTeams(newRemaining)
+    }
+  }
 
   const draftedIds = useMemo(() => {
     const ids = new Set()
@@ -177,14 +147,6 @@ function App() {
     setShowAddPlayer(false)
   }
 
-  const spinWheel = () => {
-    if (spinning || remainingTeams.length === 0 || !wheelRef.current) return
-    setSpinning(true)
-    setJustSelected(null)
-    const spinDuration = 4000 + Math.random() * 2000
-    wheelRef.current.spinToItem(Math.floor(Math.random() * remainingTeams.length), spinDuration, true, 3 + Math.random() * 2)
-  }
-
   const startDraft = () => {
     setDraftOrder(generateDraftOrder(wheelResult.map(t => t.id)))
     setPhase('draft')
@@ -192,16 +154,22 @@ function App() {
     setCurrentPick(0)
     setTimer(60)
   }
+
   const resetDraft = () => {
     if (!confirm('Reset draft?')) return
     localStorage.removeItem('draftState')
-    setPhase('setup'); setDraftOrder([]); setCurrentPick(0); setTeamRosters({}); setWheelResult([]); setRemainingTeams(TEAMS); setJustSelected(null)
-  }
-  const resetWheel = () => {
-    if (spinning) return
+    setPhase('setup')
+    setDraftOrder([])
+    setCurrentPick(0)
+    setTeamRosters({})
     setWheelResult([])
     setRemainingTeams(TEAMS)
-    setJustSelected(null)
+  }
+
+  const resetWheel = () => {
+    if (mustSpin) return
+    setWheelResult([])
+    setRemainingTeams(TEAMS)
   }
 
   const copyRoster = (team) => {
@@ -241,24 +209,34 @@ function App() {
 
         <div className="wheel-section">
           <div className="wheel-container">
-            {justSelected && (
-              <div className="selected-overlay" style={{ background: justSelected.color }}>
-                <img src={justSelected.logo} alt="" />
-                <span>#{wheelResult.length + 1}</span>
-              </div>
-            )}
             {remainingTeams.length > 0 ? (
               <>
-                <div ref={wheelContainerRef} className="wheel-canvas" />
-                <div className="wheel-pointer">▼</div>
-                <button onClick={spinWheel} disabled={spinning || allSelected} className="spin-btn">
-                  {spinning ? 'Spinning...' : allSelected ? 'All Selected!' : `SPIN (${wheelResult.length + 1}/6)`}
+                <Wheel
+                  mustStartSpinning={mustSpin}
+                  prizeNumber={prizeNumber}
+                  data={wheelData}
+                  onStopSpinning={handleStopSpinning}
+                  backgroundColors={remainingTeams.map(t => t.color)}
+                  textColors={['#fff']}
+                  outerBorderColor="#000"
+                  outerBorderWidth={2}
+                  innerRadius={15}
+                  innerBorderColor="#000"
+                  innerBorderWidth={0}
+                  radiusLineColor="#fff"
+                  radiusLineWidth={1}
+                  fontSize={14}
+                  fontWeight="bold"
+                  textDistance={60}
+                  spinDuration={2.4}
+                  disableInitialAnimation={true}
+                />
+                <button onClick={handleSpinClick} disabled={mustSpin} className="spin-btn">
+                  {mustSpin ? 'Spinning...' : `SPIN (${wheelResult.length + 1}/5)`}
                 </button>
               </>
             ) : (
-              <div className="wheel-done">
-                <span>✓</span>
-              </div>
+              <div className="wheel-done">✓</div>
             )}
           </div>
 
@@ -268,24 +246,15 @@ function App() {
               <p className="hint">Spin the wheel to determine order</p>
             ) : (
               <ol>
-                {wheelResult.map((t, i) => (
-                  <li key={t.id} style={{ color: t.color }}>
-                    <img src={t.logo} alt="" />
-                    {t.name}
-                  </li>
+                {wheelResult.map(t => (
+                  <li key={t.id} style={{ color: t.color }}>{t.name}</li>
                 ))}
               </ol>
             )}
-            {allSelected && (
-              <button onClick={startDraft} className="start-btn">Start Draft</button>
-            )}
-            {wheelResult.length > 0 && !spinning && (
-              <button onClick={resetWheel} className="reset-btn">Reset Wheel</button>
-            )}
+            {allSelected && <button onClick={startDraft} className="start-btn">Start Draft</button>}
+            {wheelResult.length > 0 && !mustSpin && <button onClick={resetWheel} className="reset-btn">Reset Wheel</button>}
           </div>
         </div>
-
-        <button onClick={resetDraft} className="reset-btn">Reset All</button>
       </div>
     )
   }
@@ -308,7 +277,6 @@ function App() {
         </div>
 
         <div className="current-team" style={{ background: currentTeam?.color }}>
-          <img src={currentTeam?.logo} alt="" />
           <h2>{currentTeam?.name}</h2>
         </div>
 
@@ -337,8 +305,7 @@ function App() {
               return (
                 <div key={t.id} className={`roster ${t.id === currentTeamId ? 'active' : ''}`} onClick={() => setSelectedTeam(t)}>
                   <div className="roster-header">
-                    <img src={t.logo} alt="" />
-                    <span>{t.name}</span>
+                    <span style={{ color: t.color, fontWeight: 'bold' }}>{t.name}</span>
                     <span className="count">{roster.length}/{TOTAL_PICKS}</span>
                   </div>
                 </div>
@@ -351,8 +318,7 @@ function App() {
           <div className="modal" onClick={() => setSelectedTeam(null)}>
             <div className="modal-content" onClick={e => e.stopPropagation()}>
               <div className="modal-header">
-                <img src={selectedTeam.logo} alt="" />
-                <h2>{selectedTeam.name}</h2>
+                <h2 style={{ color: selectedTeam.color }}>{selectedTeam.name}</h2>
                 <button onClick={() => copyRoster(selectedTeam)}>Copy</button>
                 <button onClick={() => setSelectedTeam(null)}>✕</button>
               </div>
@@ -390,10 +356,7 @@ function App() {
             const roster = teamRosters[t.id] || []
             return (
               <div key={t.id} className="final-roster" onClick={() => copyRoster(t)}>
-                <div className="final-header">
-                  <img src={t.logo} alt="" />
-                  <h2>{t.name}</h2>
-                </div>
+                <h2 style={{ color: t.color }}>{t.name}</h2>
                 <ul>{roster.map(p => <li key={p.id}>• {p.name} - {p.position} ({p.rating}) - {p.clubName}</li>)}</ul>
               </div>
             )
